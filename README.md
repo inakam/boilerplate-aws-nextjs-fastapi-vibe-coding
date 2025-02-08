@@ -73,3 +73,13 @@ cd terraform
 terraform init
 terraform apply
 ```
+
+- 以下のようなURLでアクセスできます
+  - フロントエンド
+    - `https://frontend.[取得したドメイン]`
+  - バックエンド
+    - `https://backend.[取得したドメイン]`
+    - FastAPIの場合はSwagger UIが自動生成されます
+      - `https://backend.[取得したドメイン]/docs`
+  - 静的ファイル用バケット
+    - `https://static.[取得したドメイン]`
