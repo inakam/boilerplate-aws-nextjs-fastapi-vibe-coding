@@ -1,0 +1,655 @@
+---
+description: AWS (Terraform) + Next.js + FastAPI ボイラープレートの開発ルール
+globs: *
+alwaysApply: true
+---
+
+# AWS Next.js FastAPI ボイラープレート開発ルール
+
+このプロジェクトは AWS 上にフロントエンド(Next.js)とバックエンド(FastAPI)、静的ファイル用バケットを Terraform を使って一括でデプロイするボイラープレートです。
+
+
+## 基本原則
+
+以下のルールを遵守して下さい。
+
+### 1. コミュニケーション
+
+- ユーザーとのコミュニケーションは常に日本語でお願いします。
+
+### 2. プロジェクト構成の理解
+
+- このプロジェクトは AWS(Terraform)、Next.js、FastAPI を組み合わせたサーバレスアプリケーションです。
+- フロントエンドは Next.js（TypeScript、Tailwind CSS）で構築し、Lambda Container へデプロイします。
+- バックエンドは FastAPI（Python）で構築し、Lambda Container へデプロイします。
+- インフラは Terraform で管理し、CloudFront、API Gateway、Lambda、S3 などを構成します。
+
+### 3. 重複実装の防止
+
+- 実装前に以下の確認を行ってください：
+  - 既存の類似機能の有無
+  - 同名または類似名の関数やコンポーネント
+  - 重複する API エンドポイント
+  - 共通化可能な処理の特定
+
+### 4. 単一責任の原則
+
+- 関数が長くなりすぎた場合は、小さな関数に分割して下さい。
+- ファイルが大きくなりすぎた場合は、小さなファイルに分割して下さい。
+
+### 5. 参照禁止ファイル
+
+- .env ファイルの作成・読込・編集・削除は厳禁です。ユーザーに作業を促して下さい。
+- .env ファイルはプロジェクトルートに配置しています。
+
+--
+
+
+## プロジェクト構成
+
+本プロジェクトは、AWS 上にフロントエンド(Next.js)とバックエンド(FastAPI)、静的ファイル用バケットを Terraform を使って一括でデプロイするボイラープレートです。フロントエンドとバックエンドはそれぞれ Docker コンテナ化され、Lambda Container として実行されます。
+
+### ルートディレクトリ構造
+
+```
+/
+├── frontend/                   # Next.jsフロントエンドアプリケーション
+│   ├── src/                    # ソースコード
+│   ├── public/                 # 静的ファイル
+│   ├── Dockerfile              # ローカル開発用Docker設定
+│   └── Dockerfile-lambda       # Lambda Container用Docker設定
+├── backend/                    # FastAPIバックエンドアプリケーション
+│   ├── app/                    # ソースコード
+│   ├── Dockerfile              # ローカル開発用Docker設定
+│   └── Dockerfile-lambda       # Lambda Container用Docker設定
+├── terraform/                  # Terraformによるインフラ定義
+│   ├── main.tf                 # メインの設定ファイル
+│   ├── variables.tf            # 変数定義
+│   └── outputs.tf              # 出力値の定義
+├── compose.yml                 # ローカル開発用Docker Compose設定
+└── README.md                   # プロジェクト説明
+```
+
+### フロントエンド構造 (Next.js)
+
+React ベースのフロントエンドで、TypeScript と Tailwind CSS を採用しています。
+
+### バックエンド構造 (FastAPI)
+
+Python ベースのバックエンドで、RESTful API を提供します。DynamoDB と連携してデータを保存・取得します。
+
+### インフラ構造 (Terraform)
+
+AWS 上にリソースをプロビジョニングするための Terraform 設定です。以下のリソースを作成します：
+
+- CloudFront - CDN 配信用
+- API Gateway - バックエンド API 用のエンドポイント
+- Lambda - フロントエンドとバックエンドの実行環境
+- S3 - 静的ファイル用バケット
+- ECR - Docker イメージのリポジトリ
+- Route53 - DNS レコード
+- ACM - SSL 証明書
+
+
+## フロントエンド開発 (TypeScript / Next.js)
+
+本プロジェクトのフロントエンドは Next.js を使用し、TypeScript で実装されています。以下のルールに従って開発を行ってください。
+
+### 1. TypeScript の型の使用
+
+- 明示的な型アノテーションを使用する
+- `any`型は避け、代わりに`unknown`を使用する
+- 複雑な型は`interface`/`type`で定義する
+- 配列型は`T[]`形式を優先する
+- 再利用可能な型は個別ファイルにエクスポートする
+
+### 2. インターフェース/型エイリアス
+
+- 拡張が必要な場合は`interface`を使用する
+- 高度な型操作には`type`を使用する
+- `I`プレフィックスは使用しない
+- 関連する型は同ファイルにまとめる
+
+### 3. Null/Undefined の扱い
+
+- オプショナルチェーン`?.`を活用する
+- Nullish 合体演算子`??`を使用する
+- 非 null アサーション`!`は避ける
+- 早期リターンでネストを削減する
+
+### 4. Next.js の利用
+
+- App Router の機能を積極的に活用する
+- サーバーコンポーネントとクライアントコンポーネントを適切に使い分ける
+- API はフロントエンドからバックエンドの FastAPI を呼び出す形式で実装する
+- 環境変数は`.env`ファイルではなく、Terraform から注入する形式を使用する
+
+### 5. コンポーネント設計
+
+- 単一責任の原則に基づいてコンポーネントを設計する
+- Props の型は明示的に定義する
+- 再利用可能なコンポーネントは`components`ディレクトリに配置する
+- ページ固有のコンポーネントはそのページのディレクトリに配置する
+
+### 6. スタイリング
+
+- TailwindCSS を使用してスタイリングを行う
+- カスタムクラスは`tailwind.config.ts`で定義する
+- 複雑なスタイルは分離されたコンポーネントとして実装する
+- レスポンシブデザインは Tailwind のブレークポイントを使用する
+
+### 7. エラー処理
+
+- 具体的なエラー型を使用する
+- キャッチしたエラーに型付けを行う
+- 非同期処理は`try/catch`または`Promise.catch()`を使用する
+- ユーザーに分かりやすいエラーメッセージを表示する
+
+
+## このプロジェクトで使用している技術スタック
+
+### コア技術
+
+1. **フロントエンド: Next.js**
+
+   - TypeScript ベースの React フレームワーク
+   - Tailwind CSS によるスタイリング
+   - AWS Lambda Web Adapter を使用して Lambda Container へデプロイ
+
+2. **バックエンド: FastAPI**
+
+   - Python ベースの高速な API フレームワーク
+   - 自動的な Swagger UI 生成
+   - DynamoDB との連携
+   - AWS Lambda Container にデプロイ
+
+3. **インフラ: Terraform**
+
+   - AWS リソースをコードで管理
+   - ローカル環境からの AWS リソースプロビジョニング
+   - ECR への Docker イメージのプッシュを含めた一括デプロイ
+   - Route53 ドメインとの連携
+
+### AWS サービス
+
+1. **CloudFront**
+
+   - コンテンツ配信ネットワーク(CDN)
+   - 静的ファイルとアプリケーションの配信
+   - SSL サポート(ACM 証明書を使用)
+
+2. **Lambda**
+
+   - サーバーレスコンピューティング
+   - コンテナイメージによるデプロイ
+   - スケーラブルなアプリケーション実行環境
+
+3. **API Gateway**
+
+   - バックエンド API へのエンドポイント提供
+   - リクエスト/レスポンスの処理
+   - Lambda 統合
+
+4. **S3**
+
+   - 静的ファイル用バケット
+   - Terraform の state ファイル保存
+   - 高耐久性のストレージ
+
+5. **DynamoDB**
+
+   - NoSQL データベース
+   - スケーラブルなデータストレージ
+   - オンデマンドキャパシティーモード
+
+6. **ECR**
+
+   - Docker イメージのレジストリ
+   - Lambda 用コンテナイメージの保存
+   - イメージバージョニング
+
+7. **Route53**
+
+   - DNS サービス
+   - ドメイン管理
+   - サブドメイン自動生成
+
+8. **ACM**
+
+   - SSL/TLS 証明書管理
+   - CloudFront ディストリビューション用の証明書
+   - 自動更新
+
+### 開発環境
+
+1. **Docker**
+
+   - ローカル開発環境
+   - コンテナ化されたアプリケーション
+   - Docker Compose による統合環境
+
+2. **開発ツール**
+
+   - ESLint: JavaScript と TypeScript のコード品質チェック
+   - Prettier: コードフォーマット
+   - AWS CLI: AWS リソースの管理
+
+## 開発環境のセットアップ
+
+### 必要なツール
+
+1. **必須ツールのインストール**
+
+   - Docker
+   - Terraform
+   - AWS CLI
+
+   ```bash
+   brew install terraform awscli
+   brew install --cask docker
+   ```
+
+2. **AWS CLI の設定**
+
+   ```bash
+   aws configure --profile [使用するプロファイル名]
+   ```
+
+3. **Route53 ドメインの取得**
+
+   - AWS コンソールから Route53 でドメインを取得
+   - または既存のドメインを Route53 に移行
+
+4. **S3 バケットの作成**
+
+   - Terraform の state ファイル用バケットを作成（ap-northeast-1 リージョン）
+
+5. **Terraform の設定**
+
+   - `terraform/variables.tf`を編集
+     - `root_domain`を取得したドメインに変更
+     - AWS プロファイル名の変更（4 箇所）
+     - S3 バケット名の変更
+     - `name`変数を一意の値に変更
+
+### ローカル開発ワークフロー
+
+1. **全体の開発環境起動**
+
+   ```bash
+   docker compose build
+   docker compose up
+   ```
+
+2. **フロントエンドのみ開発**
+
+   ```bash
+   cd frontend
+   docker compose up
+   ```
+
+   - アクセス URL: http://localhost:3001
+
+3. **バックエンドのみ開発**
+
+   ```bash
+   cd backend
+   docker compose up
+   ```
+
+   - アクセス URL: http://localhost:12000/docs
+
+### デプロイワークフロー
+
+1. **Terraform によるデプロイ**
+
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply
+   ```
+
+2. **デプロイ後のアクセス URL**
+
+   - フロントエンド: `https://frontend.[取得したドメイン]`
+   - バックエンド: `https://backend.[取得したドメイン]`
+   - Swagger UI: `https://backend.[取得したドメイン]/docs`
+   - 静的ファイル: `https://static.[取得したドメイン]`
+
+
+### データベース (DynamoDB)
+
+本プロジェクトでは AWS DynamoDB をデータベースとして使用しています。サーバーレスアーキテクチャに合わせて、スケーラブルな NoSQL データベースを採用しています。
+
+### DynamoDB のセットアップ
+
+- Terraform を通じて自動的にセットアップされます
+- テーブルはデプロイ時に自動的に作成されます
+- オンデマンドキャパシティモードを使用してコスト効率を高めています
+
+### データモデリング
+
+DynamoDB は非リレーショナルデータベースであるため、データのアクセスパターンを考慮したモデリングが重要です。
+
+#### 主要なテーブル設計原則
+
+1. **単一テーブルデザイン**
+
+   - 複数のエンティティタイプを 1 つのテーブルに格納
+   - パーティションキーとソートキーを効果的に設計
+   - GSI (Global Secondary Index) を利用したクエリの最適化
+
+2. **パーティションキーとソートキー**
+
+   - パーティションキー (PK): エンティティタイプと ID の組み合わせ
+   - ソートキー (SK): データの階層関係や並べ替えに利用
+
+3. **GSI の活用**
+   - インデックスを用いた効率的なクエリ
+   - 複雑なアクセスパターンのサポート
+
+### DynamoDB と FastAPI の連携
+
+FastAPI から DynamoDB へのアクセスは以下のライブラリを使用して実装します:
+
+```python
+import boto3
+from fastapi import FastAPI
+
+app = FastAPI()
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('YourTableName')
+
+@app.get("/items/{item_id}")
+async def read_item(item_id: str):
+    response = table.get_item(
+        Key={
+            'PK': f'ITEM#{item_id}',
+            'SK': f'METADATA#{item_id}'
+        }
+    )
+    item = response.get('Item', {})
+    return item
+```
+
+
+## デプロイ概要
+
+本プロジェクトは、AWS 上にサーバレスアーキテクチャでデプロイされます。フロントエンド(Next.js)とバックエンド(FastAPI)は Docker コンテナでビルドされ、Lambda Container としてデプロイされます。Terraform を使用してインフラリソースのプロビジョニングを一貫して行います。
+
+### デプロイプロセスの流れ
+
+```mermaid
+flowchart TB
+    TerraformInit[Terraform Init] --> TerraformApply[Terraform Apply]
+    TerraformApply --> ParallelBuilds[ローカルでのDockerビルド]
+
+    subgraph ParallelBuilds[ローカルでのDockerビルド]
+        BackendBuild[バックエンドイメージのビルド]
+        FrontendBuild[フロントエンドイメージのビルド]
+    end
+
+    BackendBuild --> BackendECR[バックエンドイメージをECRにプッシュ]
+    FrontendBuild --> FrontendECR[フロントエンドイメージをECRにプッシュ]
+
+    BackendECR --> LambdaBackend[バックエンドLambda Functionの作成/更新]
+    FrontendECR --> LambdaFrontend[フロントエンドLambda Functionの作成/更新]
+
+    LambdaBackend --> APIGateway[API Gatewayの設定]
+    LambdaFrontend --> CloudFront[CloudFrontディストリビューションの設定]
+
+    APIGateway --> Route53Backend[Route53 DNSレコード設定（バックエンド）]
+    CloudFront --> Route53Frontend[Route53 DNSレコード設定（フロントエンド）]
+
+    TerraformApply --> S3Bucket[静的ファイル用S3バケット作成]
+    S3Bucket --> Route53Static[Route53 DNSレコード設定（静的ファイル）]
+```
+
+### 重要なファイル
+
+デプロイプロセスを理解・修正する際には、以下のファイルを特に注視する必要があります：
+
+#### Dockerfiles
+
+1. **frontend/Dockerfile-lambda**
+
+   - フロントエンド（Next.js）の Lambda Container 用ビルド
+   - AWS Lambda Web Adapter を使用して Next.js を Lambda で実行
+   - マルチステージビルドを採用し、本番イメージサイズを最小化
+
+2. **backend/Dockerfile-lambda**
+   - バックエンド（FastAPI）の Lambda Container 用ビルド
+   - Lambda 環境での FastAPI の実行設定
+   - 必要な依存関係のインストール
+
+#### Terraform 設定
+
+1. **terraform/main.tf**
+
+   - 主要な AWS リソース定義
+   - フロントエンド、バックエンド、静的ファイル用リソースの設定
+   - CloudFront、API Gateway、Lambda の連携設定
+
+2. **terraform/variables.tf**
+
+   - プロジェクト固有の変数定義
+   - ドメイン設定、リージョン設定、プロジェクト名など
+   - AWS プロファイル設定
+
+3. **terraform/outputs.tf**
+   - デプロイ後の出力情報の定義
+   - 各サービスの URL など
+
+### 環境変数
+
+デプロイプロセスでは、以下の重要な環境変数が使用されています：
+
+#### Terraform 変数（terraform/variables.tf）
+
+- `root_domain`: ベースドメイン名
+- `name`: プロジェクト識別子
+- `aws_region`: AWS リージョン（デフォルト: ap-northeast-1）
+- AWS 認証情報（プロファイル名）
+
+### デプロイ手順
+
+1. **前提条件**
+
+   - AWS アカウントと Route53 で管理されたドメイン
+   - Terraform、Docker、AWS CLI のインストール
+   - AWS CLI でのプロファイル設定（`aws configure --profile [使用するプロファイル名]`）
+   - S3 バケットの作成（Terraform の state 管理用）
+
+2. **テンプレートのカスタマイズ**
+
+   - `terraform/variables.tf`の変数を環境に合わせて編集
+   - 必要に応じてフロントエンド・バックエンドのコードをカスタマイズ
+
+3. **デプロイの実行**
+
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply
+   ```
+
+4. **デプロイの確認**
+   - フロントエンド: `https://frontend.[ドメイン名]`
+   - バックエンド: `https://backend.[ドメイン名]`
+   - Swagger UI: `https://backend.[ドメイン名]/docs`
+   - 静的ファイル: `https://static.[ドメイン名]`
+
+### 注意点
+
+1. **初回デプロイ時間**
+
+   - CloudFront ディストリビューションの作成に時間がかかります（10〜15 分程度）
+   - SSL 証明書の検証も初回は時間がかかることがあります
+
+2. **Terraform ステート管理**
+
+   - ステートファイルは S3 で管理されるため、バケットは事前に作成が必要
+   - チーム間で作業する場合はステートファイルの管理に注意
+
+3. **Docker イメージのビルドとプッシュ**
+
+   - ローカルでの Docker ビルドと ECR へのプッシュは Terraform から自動的に行われます
+   - Docker 環境が必要です
+
+4. **リソース削除**
+   - `terraform destroy`でプロビジョニングされたリソースを一括削除できます
+   - S3 バケットに残存するオブジェクトは手動削除が必要な場合があります
+
+
+## Git 管理とバージョン管理
+
+このプロジェクトのコード管理には Git を使用します。以下のガイドラインに従ってください。
+
+### ブランチ戦略
+
+1. **main ブランチ**
+
+   - プロダクション環境に対応
+   - 直接プッシュは禁止
+   - 常にデプロイ可能な状態を維持
+
+2. **feature ブランチ**
+
+   - 新機能開発用
+   - 命名規則: `feature/機能名`
+   - 完成後は PR を通じて main にマージ
+
+3. **bugfix ブランチ**
+   - バグ修正用
+   - 命名規則: `bugfix/バグ内容`
+   - 修正後は PR を通じて main にマージ
+
+### コミットメッセージ規約
+
+コミットメッセージは以下の形式で記述します：
+
+```
+type: 変更内容の要約
+
+変更内容の詳細
+```
+
+#### type の種類：
+
+- **feat**: 新機能
+- **fix**: バグ修正
+- **docs**: ドキュメントのみの変更
+- **style**: コードの動作に影響しない変更（フォーマットなど）
+- **refactor**: バグ修正や機能追加を含まないコードの変更
+- **test**: テストの追加・修正
+- **chore**: ビルドプロセスやツールの変更
+- **perf**: パフォーマンス改善
+
+### コミットのベストプラクティス
+
+1. **小さなコミット**
+
+   - 機能単位で小さく分割
+   - 一つのコミットで一つの変更を心がける
+
+2. **コミット前の確認**
+
+   ```bash
+   # 変更内容の確認
+   git status
+   git diff
+
+   # 変更をステージング
+   git add <ファイル名>
+
+   # コミット
+   git commit -m "feat: XXX機能の追加"
+   ```
+
+3. **リモートへのプッシュ**
+
+   ```bash
+   # 初回プッシュ
+   git push -u origin <ブランチ名>
+
+   # 以降のプッシュ
+   git push
+   ```
+
+### プルリクエスト（PR）のガイドライン
+
+1. **PR の作成**
+
+   - 明確なタイトルと説明
+   - 変更内容の要約
+   - レビュアーへの注意点を記載
+
+2. **PR の内容**
+
+   ```markdown
+   ## 概要
+
+   〜の機能を追加しました。
+
+   ## 変更内容
+
+   - XXX 機能の実装
+   - YYY の修正
+   - テストケースの追加
+
+   ## レビューポイント
+
+   - XXX の実装方法は適切か
+   - エラーハンドリングは十分か
+   ```
+
+3. **レビュー後のマージ**
+   - 承認を得た後にマージ
+   - コンフリクトが発生した場合は解決してからマージ
+
+### 環境固有の設定
+
+1. **ローカル開発**
+
+   - `.env`ファイル（gitignore に含まれる）を使用
+   - 個人の開発環境に合わせた設定
+
+2. **デプロイ環境**
+   - Terraform による変数注入
+   - 機密情報は AWS サービスで管理
+
+### ファイル管理の注意点
+
+1. **管理対象に含めるべきファイル**
+
+   - ソースコード
+   - 設定ファイル（`.env`以外）
+   - ドキュメント
+   - テスト
+
+2. **管理対象に含めないファイル**
+   - `.env`ファイル
+   - ビルド成果物
+   - 依存関係（node_modules, **pycache**など）
+   - 個人の開発環境設定
+
+### コミットメッセージの例
+
+```bash
+# 新機能の追加
+feat: DynamoDB接続機能の実装
+
+# バグ修正
+fix: CloudFrontキャッシュポリシーの修正
+
+# リファクタリング
+refactor: Lambda関数のパフォーマンス最適化
+
+# テスト追加
+test: バックエンドAPIのテスト追加
+
+# ドキュメント更新
+docs: デプロイ手順の更新
+```
+
+

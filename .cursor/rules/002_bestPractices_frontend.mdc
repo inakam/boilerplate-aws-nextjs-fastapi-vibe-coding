@@ -1,0 +1,1063 @@
+---
+description: 
+globs: frontend/**
+alwaysApply: false
+---
+
+# フロントエンド開発ルール
+
+このファイルは Next.js を使用したフロントエンドの開発ルールを記載しています。
+
+
+## TypeScript の開発ルール（フロントエンド固有）
+
+このプロジェクトのフロントエンド開発では、TypeScript を使用します。以下のルールに従って開発してください。
+
+### 1. 型定義
+
+- コンポーネントの Props には明示的な型定義を行います
+- 複雑なデータ構造は個別の型定義ファイルに分離します
+
+```tsx
+// コンポーネントのProps型定義例
+interface UserCardProps {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar?: string;
+  };
+  onEdit?: (id: string) => void;
+  isSelected?: boolean;
+}
+
+export default function UserCard({
+  user,
+  onEdit,
+  isSelected = false,
+}: UserCardProps) {
+  // コンポーネント実装
+}
+```
+
+### 2. 型定義ファイル
+
+- 共通の型定義は `src/types` ディレクトリに配置します
+- API レスポンスの型は実際のレスポンス構造に合わせて定義します
+
+```tsx
+// src/types/user.ts
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
+  role: "admin" | "user" | "guest";
+  createdAt: string;
+}
+
+// src/types/api.ts
+export interface ApiResponse<T> {
+  data: T;
+  success: boolean;
+  message?: string;
+  errors?: Record<string, string[]>;
+}
+```
+
+### 3. Null と未定義の扱い
+
+- null と undefined を区別して使用します
+- オプショナルチェーン演算子（`?.`）を積極的に活用します
+- 値が存在しない可能性がある場合は、デフォルト値を提供します
+
+```tsx
+// nullと未定義の扱い方の例
+function getUserDisplayName(user?: User): string {
+  return user?.name ?? "ゲストユーザー";
+}
+```
+
+### 4. 非同期処理
+
+- 非同期関数には必ず戻り値の型を指定します（Promise<T>）
+- async/await を使用する場合は適切なエラーハンドリングを行います
+
+```tsx
+// 非同期処理の例
+async function fetchUserData(userId: string): Promise<User> {
+  try {
+    const response = await fetch(`/api/users/${userId}`);
+    if (!response.ok) {
+      throw new Error("ユーザーデータの取得に失敗しました");
+    }
+    return (await response.json()) as User;
+  } catch (error) {
+    console.error("エラーが発生しました:", error);
+    throw error;
+  }
+}
+```
+
+### 5. 型の絞り込み
+
+- 型ガードを使用して型の絞り込みを行います
+- typeof や instanceof などの型絞り込み演算子を活用します
+
+```tsx
+// 型ガードの例
+function isUser(obj: any): obj is User {
+  return obj && typeof obj === "object" && "id" in obj && "name" in obj;
+}
+
+function processItem(item: unknown): void {
+  if (isUser(item)) {
+    // ここではitemはUser型として扱われる
+    console.log(item.name);
+  } else {
+    console.log("不明なアイテムです");
+  }
+}
+```
+
+### 6. イベントハンドラの型付け
+
+- イベントハンドラには適切な型付けを行います
+- React のイベント型を使用します（例: React.MouseEvent, React.ChangeEvent）
+
+```tsx
+// イベントハンドラの型付けの例
+import { ChangeEvent, FormEvent } from "react";
+
+function LoginForm() {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    // フォーム送信処理
+  };
+
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    // 入力処理
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input type="email" name="email" onChange={handleInputChange} />
+      <button type="submit">ログイン</button>
+    </form>
+  );
+}
+```
+
+### 7. ジェネリクス
+
+- 再利用可能なコンポーネントやフックでは、適切にジェネリクスを使用します
+- 型引数には明確な名前を付けます（T, U, V よりも意味のある名前）
+
+```tsx
+// ジェネリクスの例
+interface ListProps<ItemType> {
+  items: ItemType[];
+  renderItem: (item: ItemType) => React.ReactNode;
+  keyExtractor: (item: ItemType) => string;
+}
+
+function List<ItemType>({
+  items,
+  renderItem,
+  keyExtractor,
+}: ListProps<ItemType>) {
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={keyExtractor(item)}>{renderItem(item)}</li>
+      ))}
+    </ul>
+  );
+}
+
+// 使用例
+<List<User>
+  items={users}
+  renderItem={(user) => <span>{user.name}</span>}
+  keyExtractor={(user) => user.id}
+/>;
+```
+
+### 8. カスタムフックの型付け
+
+- カスタムフックの戻り値には明示的な型を指定します
+- 複雑な戻り値はタプルよりもオブジェクト型を優先します
+
+```tsx
+// カスタムフックの型付けの例
+import { useState, useEffect } from "react";
+
+interface UseUserResult {
+  user: User | null;
+  loading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+}
+
+function useUser(userId: string): UseUserResult {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchUser = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(`/api/users/${userId}`);
+      if (!response.ok) {
+        throw new Error("ユーザーデータの取得に失敗しました");
+      }
+      const data = await response.json();
+      setUser(data);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error("未知のエラー"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUser();
+  }, [userId]);
+
+  return { user, loading, error, refetch: fetchUser };
+}
+```
+
+### 9. 型エイリアスとインターフェース
+
+- 拡張性が必要な場合はインターフェース（interface）を使用します
+- 複雑な型の合成や変換には型エイリアス（type）を使用します
+
+```tsx
+// 型エイリアスとインターフェースの使い分け例
+
+// インターフェースの例（拡張可能）
+interface ButtonProps {
+  variant?: "primary" | "secondary" | "outline";
+  size?: "small" | "medium" | "large";
+  disabled?: boolean;
+}
+
+// 拡張する場合
+interface IconButtonProps extends ButtonProps {
+  icon: React.ReactNode;
+  iconPosition?: "left" | "right";
+}
+
+// 型エイリアスの例（型の合成）
+type InputChangeHandler = (e: ChangeEvent<HTMLInputElement>) => void;
+type FormSubmitHandler = (e: FormEvent<HTMLFormElement>) => void;
+
+type FormHandlers = {
+  onChange: InputChangeHandler;
+  onSubmit: FormSubmitHandler;
+};
+```
+
+
+## Next.js の開発ルール
+
+このプロジェクトでは、Next.js 15.x 系を使用しています。フロントエンド開発においては以下のルールに従ってください。
+
+### 1. App Router の使用
+
+- App Router を使用したページ構成を行います
+- `src/app` ディレクトリ内に各ページを配置します
+- 各ディレクトリに `page.tsx` ファイルを作成することでルーティングが自動生成されます
+
+```
+src/app/
+├── layout.tsx      # ルートレイアウト
+├── page.tsx        # ホームページ ('/')
+├── about/          # '/about' のルート
+│   └── page.tsx    # '/about' のページコンポーネント
+└── products/       # '/products' のルート
+    ├── page.tsx    # '/products' のページコンポーネント
+    └── [id]/       # 動的ルートセグメント
+        └── page.tsx # '/products/[id]' のページコンポーネント
+```
+
+### 2. サーバーコンポーネントとクライアントコンポーネント
+
+- デフォルトではサーバーコンポーネントとして作成します
+- クライアントでの状態管理やイベントハンドリングが必要な場合は、明示的に `'use client'` ディレクティブを使用します
+
+```tsx
+// クライアントコンポーネントの例
+"use client";
+
+import { useState } from "react";
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(count + 1)}>Increment</button>
+    </div>
+  );
+}
+```
+
+### 3. データフェッチング
+
+- サーバーコンポーネントでは、直接バックエンドに対して fetch を行うことができます
+- クライアントコンポーネントでは API ルートを経由するか、サーバーコンポーネントから props で渡されたデータを使用します
+- バックエンド API へのリクエストには、`fetch` API を使用します
+
+```tsx
+// サーバーコンポーネントでのデータフェッチング例
+export default async function ProductsList() {
+  const products = await fetch("https://backend.[ドメイン]/api/products").then(
+    (res) => res.json()
+  );
+
+  return (
+    <div>
+      <h1>Products</h1>
+      <ul>
+        {products.map((product) => (
+          <li key={product.id}>{product.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 4. レイアウトとテンプレート
+
+- 共通の UI はレイアウトコンポーネントを使用して定義します
+- ルートレイアウト（src/app/layout.tsx）は必須です
+- 特定のセクションに対する共通レイアウトは、そのディレクトリに `layout.tsx` を配置します
+
+```tsx
+// レイアウトの例
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="dashboard-layout">
+      <nav className="dashboard-nav">{/* ナビゲーション内容 */}</nav>
+      <main className="dashboard-main">{children}</main>
+    </div>
+  );
+}
+```
+
+### 5. メタデータの設定
+
+- SEO 対策として、各ページには適切なメタデータを設定します
+- メタデータは `layout.tsx` や `page.tsx` で設定できます
+
+```tsx
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "ページタイトル",
+  description: "ページの説明文",
+  openGraph: {
+    title: "OGタイトル",
+    description: "OG説明文",
+    images: ["/og-image.jpg"],
+  },
+};
+
+export default function Page() {
+  return <div>ページコンテンツ</div>;
+}
+```
+
+### 6. 環境変数の使用
+
+- 環境変数は `.env.local` ファイル（開発環境）または Terraform から注入されたもの（本番環境）を使用します
+- クライアントサイドで使用する環境変数は `NEXT_PUBLIC_` プレフィックスを付ける必要があります
+
+```tsx
+// サーバーコンポーネントでの環境変数の使用
+const apiUrl = process.env.API_URL;
+
+// クライアントコンポーネントでの環境変数の使用
+const publicApiKey = process.env.NEXT_PUBLIC_API_KEY;
+```
+
+### 7. エラーハンドリング
+
+- エラーが発生する可能性のある処理では適切にエラーハンドリングを行います
+- `error.tsx` を使用してエラー境界を定義できます
+
+```tsx
+// app/error.tsx
+"use client";
+
+import { useEffect } from "react";
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error;
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <div>
+      <h2>エラーが発生しました</h2>
+      <button onClick={() => reset()}>再試行</button>
+    </div>
+  );
+}
+```
+
+### 8. パフォーマンス最適化
+
+- 画像は `next/image` コンポーネントを使用して最適化します
+- 大きなコンポーネントはダイナミックインポートを使用して必要に応じてロードします
+- クライアントサイドでのナビゲーションには `next/link` を使用します
+
+```tsx
+import Image from "next/image";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+
+// 大きなコンポーネントの動的インポート
+const HeavyComponent = dynamic(() => import("@/components/HeavyComponent"), {
+  loading: () => <p>Loading...</p>,
+});
+
+export default function Page() {
+  return (
+    <div>
+      <Link href="/about">About</Link>
+      <Image src="/hero.jpg" alt="Hero" width={1200} height={600} />
+      <HeavyComponent />
+    </div>
+  );
+}
+```
+
+
+## Tailwind CSS の開発ルール
+
+このプロジェクトでは、Tailwind CSS を使用してスタイリングを行います。以下のルールに従って開発してください。
+
+### 1. 基本的な使用方法
+
+- インラインで Tailwind のユーティリティクラスを使用します
+- クラス名は機能ごとに順序付けることを推奨します（レイアウト → スタイリング → インタラクション）
+
+```tsx
+// 推奨される順序
+<div className="flex items-center p-4 bg-white rounded-lg shadow hover:shadow-md transition-shadow">
+  コンテンツ
+</div>
+```
+
+### 2. カスタマイズ
+
+- プロジェクト固有のデザイントークンは `tailwind.config.ts` に定義します
+- カスタムテーマ設定は以下のように行います：
+
+```typescript
+// tailwind.config.ts
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: "#0070f3",
+        secondary: "#ff4081",
+      },
+      fontFamily: {
+        sans: ["var(--font-inter)", "sans-serif"],
+      },
+      spacing: {
+        "128": "32rem",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+```
+
+### 3. レスポンシブデザイン
+
+- Tailwind のブレークポイントを使用してレスポンシブデザインを実装します
+- モバイルファーストのアプローチを採用し、基本スタイルはモバイル向けに設定し、大きなブレークポイント用に拡張します
+
+```tsx
+<div className="w-full md:w-1/2 lg:w-1/3 p-4">コンテンツ</div>
+```
+
+### 4. コンポーネントのスタイリング
+
+- 再利用可能なコンポーネントのスタイルは一貫性を保つために Props で制御できるようにします
+- 条件付きクラスには `clsx` または `classnames` ライブラリの使用を推奨します
+
+```tsx
+import { clsx } from "clsx";
+
+interface ButtonProps {
+  primary?: boolean;
+  size?: "small" | "medium" | "large";
+  children: React.ReactNode;
+}
+
+export default function Button({
+  primary = false,
+  size = "medium",
+  children,
+}: ButtonProps) {
+  return (
+    <button
+      className={clsx(
+        "rounded font-bold transition-colors",
+        primary ? "bg-primary text-white" : "bg-gray-200 text-gray-800",
+        {
+          "px-2 py-1 text-sm": size === "small",
+          "px-4 py-2": size === "medium",
+          "px-6 py-3 text-lg": size === "large",
+        }
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+### 5. ダークモード
+
+- ダークモードのサポートを追加する場合は、`dark:` プレフィックスを使用します
+- ダークモードはクラスまたはメディアクエリベースで設定できます（tailwind.config.js で設定）
+
+```tsx
+// ダークモードの例
+<div className="bg-white text-black dark:bg-gray-800 dark:text-white">
+  暗い背景に明るいテキスト（ダークモード時）
+</div>
+```
+
+### 6. アニメーション
+
+- 基本的なアニメーションには Tailwind の組み込みクラスを使用します
+- 複雑なアニメーションには CSS keyframes をカスタム定義します
+
+```tsx
+// 基本的なトランジション
+<button className="transform hover:scale-105 transition-transform">
+  ホバー時に拡大
+</button>
+
+// カスタムアニメーション
+<div className="animate-bounce">
+  バウンドするアニメーション
+</div>
+```
+
+### 7. 命名規則
+
+- コンポーネント固有のカスタムクラスが必要な場合は、BEM ライクな命名規則を使用します
+- グローバルスタイルは src/app/globals.css に定義し、最小限に抑えます
+
+```css
+/* globals.css の例 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .card {
+    @apply bg-white rounded-lg shadow p-6;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white font-bold py-2 px-4 rounded hover:bg-primary-dark;
+  }
+}
+```
+
+### 8. パフォーマンスの考慮
+
+- 未使用の Tailwind クラスを削除するために Purge を有効にします（ビルド時に自動で行われます）
+- 複雑な UI コンポーネントでは、パフォーマンスを考慮して Tailwind を使用したコンポーネントベースのアプローチを採用します
+
+### 9. アクセシビリティ
+
+- コントラスト比やフォーカス状態などのアクセシビリティを考慮したクラスを使用します
+- スクリーンリーダー向けのクラス（sr-only）などを適切に使用します
+
+```tsx
+<button className="bg-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+  アクセシブルなボタン
+  <span className="sr-only">（スクリーンリーダーのみ）詳細を見る</span>
+</button>
+```
+
+
+## AWS Lambda Web Adapter の利用ルール
+
+このプロジェクトでは、Next.js アプリケーションを AWS Lambda にデプロイするために AWS Lambda Web Adapter を使用しています。以下のルールに従って開発・デプロイを行ってください。
+
+### 1. 基本的な仕組み
+
+AWS Lambda Web Adapter は、HTTP リクエストを Lambda 関数で処理できるようにするアダプターです。Next.js アプリケーションをサーバーレスアーキテクチャで実行するために使用されます。
+
+```
+Client Request → API Gateway → Lambda → Lambda Web Adapter → Next.js
+```
+
+### 2. Dockerfile-lambda の理解
+
+Lambda 用の Docker イメージは `Dockerfile-lambda` で定義されています。以下の特徴があります：
+
+```dockerfile
+# ビルドステージ
+FROM node:20-slim AS builder
+WORKDIR /app
+COPY . .
+RUN npm ci
+RUN npm run build
+
+# 実行ステージ
+FROM public.ecr.aws/lambda/nodejs:20
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+# Lambda Web Adapter のインストール
+COPY --from=public.ecr.aws/awslambda/aws-lambda-web-adapter:0.8.0 /lambda-web-adapter /opt/extensions/lambda-web-adapter
+
+# ビルド済みのアプリケーションをコピー
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+# 環境変数設定
+ENV PORT=3000
+ENV NODE_ENV=production
+ENV AWS_LAMBDA_EXEC_WRAPPER=/opt/extensions/lambda-web-adapter
+
+# Lambda ハンドラー
+CMD ["node_modules/next/dist/bin/next", "start"]
+```
+
+### 3. 開発時の注意点
+
+1. **サーバーサイドコードの制約**
+
+   - Lambda の制約を考慮したサーバーサイドコードを書く必要があります
+   - タイムアウトが設定されているため、長時間実行される処理は避けます
+   - ファイルシステムへの書き込みは `/tmp` ディレクトリのみ可能です
+
+2. **環境変数の扱い**
+
+   - 開発環境では `.env.local` ファイルを使用
+   - 本番環境では Terraform から環境変数が注入されます
+   - `process.env.NODE_ENV` は Lambda 実行時に `production` になります
+
+3. **ステートレスな設計**
+
+   - Lambda は実行ごとにコンテナが破棄される可能性があります
+   - アプリケーションはステートレスに設計する必要があります
+   - セッション情報などは外部ストレージ（DynamoDB など）に保存します
+
+### 4. デプロイ時の考慮事項
+
+1. **イメージサイズの最適化**
+
+   - Lambda コンテナイメージのサイズは小さく保つ
+   - 不要なファイル（開発用ツールなど）は含めない
+   - マルチステージビルドを活用してイメージサイズを削減
+
+2. **コールドスタートの対策**
+
+   - Next.js アプリケーションは初回起動時に時間がかかる場合がある
+   - 重要な機能は事前ウォームアップを検討
+   - SSR/SSG を適切に使い分ける
+
+3. **メモリ設定**
+
+   - Terraform で Lambda 関数のメモリ割り当てを適切に設定
+   - Next.js は比較的メモリを消費するため、十分なメモリを確保する
+
+### 5. ローカル開発と本番環境の違い
+
+1. **ローカル開発環境**
+
+   - `docker compose up` で通常の Next.js 開発サーバーが起動
+   - ホットリロードや開発者ツールが使用可能
+   - API リクエストは直接バックエンドの FastAPI に向ける
+
+2. **本番環境（Lambda）**
+
+   - Lambda Web Adapter を介して Next.js アプリケーションが実行
+   - CloudFront → API Gateway → Lambda の流れでリクエストが処理
+   - API リクエストは API Gateway を通じてバックエンドの Lambda 関数に転送
+
+### 6. デバッグとトラブルシューティング
+
+1. **ローカルでの Lambda 環境テスト**
+
+   ```bash
+   # ローカルで Lambda コンテナをビルド
+   docker build -f Dockerfile-lambda -t nextjs-lambda .
+
+   # Lambda コンテナをローカルで実行
+   docker run -p 9000:8080 nextjs-lambda
+
+   # 別のターミナルでテストリクエスト
+   curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{}'
+   ```
+
+2. **CloudWatch Logs の活用**
+
+   - Lambda 実行時のログは CloudWatch Logs に記録
+   - エラーやパフォーマンスの問題を調査する際に参照
+   - `console.log` や `console.error` の出力も確認可能
+
+3. **一般的な問題対処**
+
+   - タイムアウトエラー → Lambda のタイムアウト設定を確認
+   - メモリ不足エラー → メモリ割り当てを増やす
+   - コールドスタート問題 → プロビジョンドコンカレンシーの検討
+
+### 7. パフォーマンス最適化
+
+1. **サーバーサイドレンダリング (SSR) と静的生成 (SSG) の使い分け**
+
+   - 頻繁に変更されないコンテンツは SSG を使用
+   - ユーザー固有のデータが必要なページは SSR を使用
+
+2. **画像最適化**
+
+   - `next/image` コンポーネントを使用
+   - ただし Lambda 環境ではイメージ最適化に制限がある場合も
+
+3. **API ルート最適化**
+
+   - API レスポンスはキャッシュを活用
+   - 大きなペイロードの送受信は避ける
+
+
+## バックエンド API との連携ルール
+
+このプロジェクトでは、Next.js フロントエンドから FastAPI バックエンドへの API 連携を行います。以下のルールに従って API 連携を実装してください。
+
+### 1. API エンドポイントの利用
+
+フロントエンドからバックエンドへのアクセスは、以下のエンドポイントを使用します：
+
+- **開発環境**: `http://localhost:12000/api/...`
+- **本番環境**: `https://backend.[ドメイン名]/api/...`
+
+環境に応じて適切なエンドポイントを使用するために、環境変数を活用します：
+
+```tsx
+// APIエンドポイントを環境変数から取得
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:12000";
+
+// APIリクエスト関数
+async function fetchFromApi<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`API request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+```
+
+### 2. サーバーコンポーネントでの API アクセス
+
+サーバーコンポーネントでは、直接バックエンド API にアクセスできます：
+
+```tsx
+// サーバーコンポーネントでのAPI呼び出し例
+async function ProductList() {
+  const products = await fetch("https://backend.[ドメイン名]/api/products")
+    .then((res) => {
+      if (!res.ok) throw new Error("Failed to fetch products");
+      return res.json();
+    })
+    .catch((error) => {
+      console.error("Error fetching products:", error);
+      return [];
+    });
+
+  return (
+    <div>
+      <h1>Products</h1>
+      <ul>
+        {products.map((product) => (
+          <li key={product.id}>{product.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 3. クライアントコンポーネントでの API アクセス
+
+クライアントコンポーネントでは、React の `useEffect` や `useState` を使用して API アクセスを行います：
+
+```tsx
+"use client";
+
+import { useState, useEffect } from "react";
+
+// クライアントコンポーネントでのAPI呼び出し例
+export default function ProductListClient() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        setLoading(true);
+        const response = await fetch("/api/products");
+        if (!response.ok) {
+          throw new Error("Failed to fetch products");
+        }
+        const data = await response.json();
+        setProducts(data);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchProducts();
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+
+  return (
+    <div>
+      <h1>Products</h1>
+      <ul>
+        {products.map((product) => (
+          <li key={product.id}>{product.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 4. API ルートの活用
+
+必要に応じて、Next.js の API ルートを使用してバックエンド API へのプロキシを実装できます：
+
+```tsx
+// app/api/products/route.ts
+import { NextRequest, NextResponse } from "next/server";
+
+const API_URL = process.env.API_URL || "http://localhost:12000";
+
+export async function GET(request: NextRequest) {
+  try {
+    const response = await fetch(`${API_URL}/api/products`);
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: "Failed to fetch products" },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### 5. API レスポンスの型定義
+
+API レスポンスには必ず型定義を行い、型安全な実装を心がけます：
+
+```tsx
+// src/types/api.ts
+export interface Product {
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  imageUrl?: string;
+}
+
+export interface ApiResponse<T> {
+  data: T;
+  success: boolean;
+  message?: string;
+}
+
+// 使用例
+async function fetchProducts(): Promise<ApiResponse<Product[]>> {
+  const response = await fetch("/api/products");
+  if (!response.ok) {
+    throw new Error("Failed to fetch products");
+  }
+  return response.json();
+}
+```
+
+### 6. エラーハンドリング
+
+API リクエストには適切なエラーハンドリングを実装します：
+
+```tsx
+async function fetchData<T>(url: string): Promise<T> {
+  try {
+    const response = await fetch(url);
+
+    // HTTP エラーのハンドリング
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `API request failed with status ${response.status}`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    // ネットワークエラーのハンドリング
+    if (error instanceof TypeError && error.message === "Failed to fetch") {
+      console.error("Network error, API endpoint might be unreachable");
+      throw new Error("Network error, please check your connection");
+    }
+
+    // その他のエラー
+    console.error("API request error:", error);
+    throw error;
+  }
+}
+```
+
+### 7. CORS 対策
+
+開発環境で CORS の問題が発生した場合は、以下の対策を考慮してください：
+
+1. バックエンド側で適切な CORS ヘッダーを設定
+2. Next.js の API ルートを使用してプロキシとして機能させる
+3. 開発サーバーで `next.config.js` の `rewrites` を設定
+
+```javascript
+// next.config.js
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:12000/api/:path*",
+      },
+    ];
+  },
+};
+```
+
+### 8. 認証と認可
+
+API リクエストに認証情報が必要な場合は、以下のパターンを使用します：
+
+```tsx
+// 認証ヘッダーを含むAPIリクエスト
+async function fetchAuthenticatedData<T>(
+  url: string,
+  token: string
+): Promise<T> {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    // 401や403エラーのハンドリング
+    if (response.status === 401) {
+      // 認証エラー処理（例: ログイン画面へのリダイレクト）
+      throw new Error("Authentication required");
+    }
+
+    if (response.status === 403) {
+      // 認可エラー処理
+      throw new Error("You do not have permission to access this resource");
+    }
+
+    throw new Error(`API request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+```
+
+### 9. キャッシュ戦略
+
+パフォーマンス向上のために適切なキャッシュ戦略を実装します：
+
+```tsx
+// サーバーコンポーネントでのキャッシュ制御
+async function getProducts() {
+  const response = await fetch("https://backend.[ドメイン名]/api/products", {
+    // デフォルトでキャッシュを使用（30秒間有効）
+    next: { revalidate: 30 },
+  });
+
+  return response.json();
+}
+
+// キャッシュを使用しない場合
+async function getUserProfile(userId: string) {
+  const response = await fetch(
+    `https://backend.[ドメイン名]/api/users/${userId}`,
+    {
+      cache: "no-store", // キャッシュを使用しない
+    }
+  );
+
+  return response.json();
+}
+```
+
+

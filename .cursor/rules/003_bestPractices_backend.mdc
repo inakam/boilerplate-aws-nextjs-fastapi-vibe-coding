@@ -1,0 +1,2000 @@
+---
+description: 
+globs: backend/**
+alwaysApply: false
+---
+
+# バックエンド開発ルール
+
+このファイルは FastAPI を使用したバックエンドの開発ルールを記載しています。
+
+# 003_bestPractices_backend.mdc
+
+--
+
+
+## FastAPI の開発ルール
+
+このプロジェクトでは、FastAPI フレームワークを使用してバックエンド API を開発します。以下のルールに従って開発を行ってください。
+
+### 1. プロジェクト構造
+
+FastAPI アプリケーションは、以下のような構造で構成することを推奨します：
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py          # アプリケーションのエントリーポイント
+│   ├── api/             # APIエンドポイントの実装
+│   │   ├── __init__.py
+│   │   ├── routes/      # ルーターの定義
+│   │   └── dependencies/  # 依存性の定義
+│   ├── core/            # アプリケーションの中核機能
+│   │   ├── __init__.py
+│   │   ├── config.py    # 設定
+│   │   └── security.py  # セキュリティ関連
+│   ├── db/              # データベース関連
+│   │   ├── __init__.py
+│   │   └── models.py    # DynamoDBモデル
+│   ├── models/          # Pydanticモデル
+│   │   ├── __init__.py
+│   │   └── user.py      # ユーザーモデルなど
+│   ├── schemas/         # リクエスト/レスポンスのスキーマ
+│   │   └── __init__.py
+│   └── services/        # ビジネスロジック
+│       └── __init__.py
+├── requirements.txt
+├── Dockerfile
+└── Dockerfile-lambda    # Lambda用のDockerfile
+```
+
+### 2. エンドポイント定義
+
+API エンドポイントは、RESTful な設計原則に従って定義します：
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List
+
+from app.models.user import UserModel
+from app.schemas.user import UserCreate, UserResponse
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/", response_model=List[UserResponse])
+async def get_users():
+    """
+    すべてのユーザーを取得する
+    """
+    # ユーザー取得ロジック
+    return users
+
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(user: UserCreate):
+    """
+    新しいユーザーを作成する
+    """
+    # ユーザー作成ロジック
+    return new_user
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(user_id: str):
+    """
+    指定されたIDのユーザーを取得する
+    """
+    # ユーザー取得ロジック
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    return user
+```
+
+### 3. Pydantic モデル
+
+データのバリデーションと型付けには Pydantic モデルを使用します：
+
+```python
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional
+from datetime import datetime
+
+class UserBase(BaseModel):
+    email: EmailStr
+    name: str = Field(..., min_length=2, max_length=50)
+
+class UserCreate(UserBase):
+    password: str = Field(..., min_length=8)
+
+class UserResponse(UserBase):
+    id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "email": "user@example.com",
+                "name": "John Doe",
+                "created_at": "2023-01-01T00:00:00Z",
+                "updated_at": "2023-01-02T00:00:00Z"
+            }
+        }
+```
+
+### 4. 依存性注入
+
+FastAPI の依存性注入を使用して、共通の機能を再利用可能にします：
+
+```python
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+from app.core.security import decode_jwt_token
+from app.services.user_service import get_user_by_id
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """
+    現在認証されているユーザーを取得する依存性
+    """
+    try:
+        payload = decode_jwt_token(token)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = await get_user_by_id(user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
+```
+
+### 5. エラーハンドリング
+
+適切な HTTP ステータスコードとエラーメッセージでエラーをハンドリングします：
+
+```python
+from fastapi import HTTPException, status
+
+# 404エラー
+if item is None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Item not found"
+    )
+
+# 400エラー（不正なリクエスト）
+if not is_valid_data(data):
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid data provided"
+    )
+
+# 403エラー（権限不足）
+if not has_permission(user, item):
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not enough permissions"
+    )
+```
+
+### 6. DynamoDB との連携
+
+AWS DynamoDB をデータストレージとして使用します：
+
+```python
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
+
+# DynamoDBクライアントの設定
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('YourTableName')
+
+# アイテムの取得
+def get_item_by_id(item_id: str):
+    response = table.get_item(
+        Key={
+            'PK': f'ITEM#{item_id}',
+            'SK': f'METADATA#{item_id}'
+        }
+    )
+    return response.get('Item')
+
+# アイテムの作成
+def create_item(item_data: dict):
+    item_id = str(uuid.uuid4())
+    timestamp = datetime.now().isoformat()
+
+    item = {
+        'PK': f'ITEM#{item_id}',
+        'SK': f'METADATA#{item_id}',
+        'id': item_id,
+        'data': item_data,
+        'created_at': timestamp,
+        'updated_at': timestamp
+    }
+
+    table.put_item(Item=item)
+    return item
+```
+
+### 7. ドキュメンテーション
+
+FastAPI の自動生成されるドキュメント（Swagger UI）のために、明確なドキュメントを記述します：
+
+```python
+@router.post("/items/", response_model=Item, status_code=status.HTTP_201_CREATED)
+async def create_item(item: ItemCreate):
+    """
+    新しいアイテムを作成します。
+
+    - **name**: アイテムの名前（必須）
+    - **description**: アイテムの説明（オプション）
+    - **price**: アイテムの価格（必須）
+    - **tags**: アイテムに関連するタグのリスト（オプション）
+
+    認証されたユーザーのみがアイテムを作成できます。
+
+    Returns:
+        作成されたアイテムの詳細
+    """
+    # アイテム作成ロジック
+    return created_item
+```
+
+### 8. 環境設定
+
+環境変数を使用してアプリケーションを設定します：
+
+```python
+from pydantic import BaseSettings
+
+class Settings(BaseSettings):
+    app_name: str = "FastAPI Backend"
+    debug: bool = False
+    environment: str = "development"
+    dynamodb_table_name: str
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 30
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+### 9. アプリケーションスタートアップ
+
+アプリケーションの起動設定は main.py で行います：
+
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.routes import user_router, item_router
+from app.core.config import settings
+
+app = FastAPI(
+    title=settings.app_name,
+    description="FastAPI Backend for AWS Next.js + FastAPI Boilerplate",
+    version="0.1.0",
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+)
+
+# CORSミドルウェアの設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 本番環境では適切に制限してください
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ルーターの登録
+app.include_router(user_router)
+app.include_router(item_router)
+
+@app.get("/health")
+async def health_check():
+    """
+    アプリケーションのヘルスチェックエンドポイント
+    """
+    return {"status": "healthy"}
+```
+
+### 10. Lambda 用の設定
+
+AWS Lambda 環境で実行される際の設定に注意します：
+
+```python
+# Lambda関数のハンドラーとして動作するための設定
+# main.pyは変更せず、必要な設定はDockerfileで行います
+
+# Dockerfile-lambdaの例
+FROM public.ecr.aws/lambda/python:3.13
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
+WORKDIR /code
+
+COPY ./requirements.txt /code/requirements.txt
+
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+
+COPY ./app /code/app
+
+ENTRYPOINT ["uvicorn"]
+CMD [ "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+
+## DynamoDB 連携ルール
+
+このプロジェクトでは、AWS DynamoDB をデータベースとして使用します。以下のルールに従って DynamoDB との連携を実装してください。
+
+### 1. 単一テーブル設計
+
+DynamoDB では、複数のエンティティタイプを 1 つのテーブルに格納する「単一テーブル設計」を採用します：
+
+```
+テーブル名: AppTable
+
+パーティションキー (PK): エンティティタイプとIDの組み合わせ（例: USER#123, ITEM#456）
+ソートキー (SK): 階層関係やメタデータを表現（例: METADATA#123, COMMENT#001）
+```
+
+### 2. データモデリング
+
+以下のようなプライマリーキー構造を使用します：
+
+```python
+# ユーザーエンティティ
+{
+    'PK': 'USER#user_id',
+    'SK': 'METADATA#user_id',
+    'id': 'user_id',
+    'email': 'user@example.com',
+    'name': 'John Doe',
+    'created_at': '2023-01-01T00:00:00Z',
+    'updated_at': '2023-01-01T00:00:00Z'
+}
+
+# アイテムエンティティ
+{
+    'PK': 'ITEM#item_id',
+    'SK': 'METADATA#item_id',
+    'id': 'item_id',
+    'user_id': 'user_id',  # 所有者
+    'name': 'Item Name',
+    'description': 'Item Description',
+    'created_at': '2023-01-01T00:00:00Z',
+    'updated_at': '2023-01-01T00:00:00Z'
+}
+
+# ユーザーのアイテムリレーション（GSIを使用）
+{
+    'PK': 'USER#user_id',
+    'SK': 'ITEM#item_id',
+    'GSI1PK': 'ITEM#item_id',
+    'GSI1SK': 'USER#user_id',
+    'relationship_type': 'owner',
+    'created_at': '2023-01-01T00:00:00Z'
+}
+```
+
+### 3. グローバルセカンダリインデックス（GSI）
+
+一般的なアクセスパターンをサポートするために、以下のような GSI を設計します：
+
+```
+GSI1:
+  - パーティションキー: GSI1PK (SK属性をマッピング)
+  - ソートキー: GSI1SK (PK属性をマッピング)
+  - 用途: 逆引きの関係を効率的にクエリする
+
+GSI2:
+  - パーティションキー: type (エンティティタイプ)
+  - ソートキー: created_at
+  - 用途: エンティティタイプ別の時系列クエリ
+```
+
+### 4. DynamoDB とのインタフェース
+
+Boto3 クライアントを使用して DynamoDB と通信するためのヘルパー関数：
+
+```python
+import boto3
+import uuid
+import json
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+
+# DynamoDBクライアントの初期化
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('AppTable')  # 環境によってテーブル名を変更
+
+# ユーザー関連の操作
+def create_user(email: str, name: str, password_hash: str) -> Dict[str, Any]:
+    """新しいユーザーを作成する"""
+    user_id = str(uuid.uuid4())
+    timestamp = datetime.now().isoformat()
+
+    user_item = {
+        'PK': f'USER#{user_id}',
+        'SK': f'METADATA#{user_id}',
+        'type': 'USER',
+        'id': user_id,
+        'email': email,
+        'name': name,
+        'password_hash': password_hash,
+        'created_at': timestamp,
+        'updated_at': timestamp
+    }
+
+    table.put_item(Item=user_item)
+
+    # パスワードハッシュを除外して返す
+    user_data = {k: v for k, v in user_item.items() if k != 'password_hash'}
+    return user_data
+
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    """ユーザーIDでユーザーを取得する"""
+    response = table.get_item(
+        Key={
+            'PK': f'USER#{user_id}',
+            'SK': f'METADATA#{user_id}'
+        }
+    )
+
+    user = response.get('Item')
+    if user:
+        # パスワードハッシュを除外
+        return {k: v for k, v in user.items() if k != 'password_hash'}
+    return None
+
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """メールアドレスでユーザーを取得する"""
+    # GSIを使用してメールアドレスでインデックスを作成するか、
+    # スキャン操作でフィルタリング（小規模アプリケーションの場合）
+    response = table.scan(
+        FilterExpression='email = :email AND begins_with(PK, :pk_prefix)',
+        ExpressionAttributeValues={
+            ':email': email,
+            ':pk_prefix': 'USER#'
+        }
+    )
+
+    items = response.get('Items', [])
+    if items:
+        # パスワードハッシュを除外
+        return {k: v for k, v in items[0].items() if k != 'password_hash'}
+    return None
+```
+
+### 5. トランザクションの使用
+
+関連するデータ変更には、トランザクションを使用して整合性を確保します：
+
+```python
+def create_item_with_user_relation(user_id: str, item_data: Dict[str, Any]) -> Dict[str, Any]:
+    """ユーザーに関連付けられたアイテムをトランザクションで作成する"""
+    item_id = str(uuid.uuid4())
+    timestamp = datetime.now().isoformat()
+
+    # アイテムエンティティ
+    item = {
+        'PK': f'ITEM#{item_id}',
+        'SK': f'METADATA#{item_id}',
+        'type': 'ITEM',
+        'id': item_id,
+        'user_id': user_id,
+        'name': item_data.get('name'),
+        'description': item_data.get('description'),
+        'created_at': timestamp,
+        'updated_at': timestamp
+    }
+
+    # ユーザーとアイテムの関連付け
+    relation = {
+        'PK': f'USER#{user_id}',
+        'SK': f'ITEM#{item_id}',
+        'GSI1PK': f'ITEM#{item_id}',
+        'GSI1SK': f'USER#{user_id}',
+        'type': 'USER_ITEM_RELATION',
+        'relationship_type': 'owner',
+        'created_at': timestamp
+    }
+
+    # トランザクションでの書き込み
+    dynamodb_client = boto3.client('dynamodb')
+    response = dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                'Put': {
+                    'TableName': 'AppTable',
+                    'Item': {k: serialize_value(v) for k, v in item.items()}
+                }
+            },
+            {
+                'Put': {
+                    'TableName': 'AppTable',
+                    'Item': {k: serialize_value(v) for k, v in relation.items()}
+                }
+            }
+        ]
+    )
+
+    return item
+
+# DynamoDBの型シリアライズヘルパー
+def serialize_value(value):
+    """値をDynamoDB形式にシリアライズする"""
+    if isinstance(value, str):
+        return {'S': value}
+    elif isinstance(value, int):
+        return {'N': str(value)}
+    elif isinstance(value, float):
+        return {'N': str(value)}
+    elif isinstance(value, bool):
+        return {'BOOL': value}
+    elif isinstance(value, list):
+        return {'L': [serialize_value(v) for v in value]}
+    elif isinstance(value, dict):
+        return {'M': {k: serialize_value(v) for k, v in value.items()}}
+    elif value is None:
+        return {'NULL': True}
+    else:
+        return {'S': str(value)}
+```
+
+### 6. クエリのベストプラクティス
+
+DynamoDB のクエリには以下のベストプラクティスに従います：
+
+```python
+# 1. 正確なクエリ（キー条件のみ）
+def get_user_items(user_id: str) -> List[Dict[str, Any]]:
+    """ユーザーが所有するすべてのアイテムを取得する"""
+    response = table.query(
+        KeyConditionExpression='PK = :pk AND begins_with(SK, :sk_prefix)',
+        ExpressionAttributeValues={
+            ':pk': f'USER#{user_id}',
+            ':sk_prefix': 'ITEM#'
+        }
+    )
+    return response.get('Items', [])
+
+# 2. GSIを使用したクエリ
+def get_recent_items(limit: int = 10) -> List[Dict[str, Any]]:
+    """最近作成されたアイテムを取得する（GSI2を使用）"""
+    response = table.query(
+        IndexName='GSI2',
+        KeyConditionExpression='#type = :item_type',
+        ExpressionAttributeNames={
+            '#type': 'type'  # typeは予約語のため
+        },
+        ExpressionAttributeValues={
+            ':item_type': 'ITEM'
+        },
+        ScanIndexForward=False,  # 降順（最新順）
+        Limit=limit
+    )
+    return response.get('Items', [])
+
+# 3. フィルタ式の使用
+def search_items(keyword: str) -> List[Dict[str, Any]]:
+    """キーワードを含むアイテムを検索する"""
+    response = table.scan(
+        FilterExpression='contains(#name, :keyword) OR contains(description, :keyword)',
+        ExpressionAttributeNames={
+            '#name': 'name'  # nameは予約語のため
+        },
+        ExpressionAttributeValues={
+            ':keyword': keyword
+        }
+    )
+    return response.get('Items', [])
+```
+
+### 7. 効率的なデータ取得
+
+バッチ操作や並列処理を使用して、大量のデータを効率的に取得します：
+
+```python
+def batch_get_items(item_ids: List[str]) -> List[Dict[str, Any]]:
+    """複数のアイテムをバッチで取得する"""
+    # KeysごとにグループサイズをDynamoDBの制限（100）以下に保つ
+    items = []
+    for i in range(0, len(item_ids), 100):
+        batch = item_ids[i:i + 100]
+        response = dynamodb.batch_get_item(
+            RequestItems={
+                'AppTable': {
+                    'Keys': [
+                        {
+                            'PK': f'ITEM#{item_id}',
+                            'SK': f'METADATA#{item_id}'
+                        }
+                        for item_id in batch
+                    ]
+                }
+            }
+        )
+        items.extend(response.get('Responses', {}).get('AppTable', []))
+    return items
+```
+
+### 8. ローカル DynamoDB のセットアップ
+
+ローカル開発では、DynamoDB Local を使用してテストできます：
+
+```python
+# ローカル開発環境の場合
+if os.environ.get('ENVIRONMENT') == 'development':
+    # DynamoDB Localに接続
+    dynamodb = boto3.resource(
+        'dynamodb',
+        endpoint_url='http://localhost:8000',
+        region_name='local',
+        aws_access_key_id='dummy',
+        aws_secret_access_key='dummy'
+    )
+else:
+    # 本番環境ではAWSの認証情報を使用
+    dynamodb = boto3.resource('dynamodb')
+```
+
+### 9. エラーハンドリング
+
+DynamoDB 操作のエラーを適切に処理します：
+
+```python
+from botocore.exceptions import ClientError
+
+def safe_get_item(pk: str, sk: str) -> Optional[Dict[str, Any]]:
+    """安全にアイテムを取得する"""
+    try:
+        response = table.get_item(
+            Key={
+                'PK': pk,
+                'SK': sk
+            }
+        )
+        return response.get('Item')
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        print(f"DynamoDB Error: {error_code} - {error_message}")
+
+        # エラータイプに応じた処理
+        if error_code == 'ResourceNotFoundException':
+            # テーブルが存在しない
+            return None
+        elif error_code == 'ProvisionedThroughputExceededException':
+            # スロットリング - 再試行ロジックを実装
+            time.sleep(1)  # 簡易的な再試行（本番では指数バックオフを使用）
+            return safe_get_item(pk, sk)
+        else:
+            # その他のエラー
+            raise
+```
+
+### 10. テスト用ヘルパー
+
+単体テストやインテグレーションテスト用のヘルパー関数：
+
+```python
+def setup_test_table():
+    """テスト用のDynamoDBテーブルをセットアップする"""
+    # DynamoDB Localに接続
+    dynamodb_local = boto3.resource(
+        'dynamodb',
+        endpoint_url='http://localhost:8000',
+        region_name='local',
+        aws_access_key_id='dummy',
+        aws_secret_access_key='dummy'
+    )
+
+    # テーブルが存在する場合は削除
+    try:
+        dynamodb_local.Table('TestTable').delete()
+        print("Deleted existing TestTable")
+    except ClientError:
+        pass  # テーブルが存在しない場合は無視
+
+    # テーブルを作成
+    table = dynamodb_local.create_table(
+        TableName='TestTable',
+        KeySchema=[
+            {'AttributeName': 'PK', 'KeyType': 'HASH'},
+            {'AttributeName': 'SK', 'KeyType': 'RANGE'}
+        ],
+        AttributeDefinitions=[
+            {'AttributeName': 'PK', 'AttributeType': 'S'},
+            {'AttributeName': 'SK', 'AttributeType': 'S'},
+            {'AttributeName': 'GSI1PK', 'AttributeType': 'S'},
+            {'AttributeName': 'GSI1SK', 'AttributeType': 'S'},
+            {'AttributeName': 'type', 'AttributeType': 'S'},
+            {'AttributeName': 'created_at', 'AttributeType': 'S'}
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                'IndexName': 'GSI1',
+                'KeySchema': [
+                    {'AttributeName': 'GSI1PK', 'KeyType': 'HASH'},
+                    {'AttributeName': 'GSI1SK', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'},
+                'ProvisionedThroughput': {
+                    'ReadCapacityUnits': 5,
+                    'WriteCapacityUnits': 5
+                }
+            },
+            {
+                'IndexName': 'GSI2',
+                'KeySchema': [
+                    {'AttributeName': 'type', 'KeyType': 'HASH'},
+                    {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'},
+                'ProvisionedThroughput': {
+                    'ReadCapacityUnits': 5,
+                    'WriteCapacityUnits': 5
+                }
+            }
+        ],
+        ProvisionedThroughput={
+            'ReadCapacityUnits': 5,
+            'WriteCapacityUnits': 5
+        }
+    )
+
+    # テーブルが作成されるのを待つ
+    table.meta.client.get_waiter('table_exists').wait(TableName='TestTable')
+    print("Created TestTable")
+
+    return table
+```
+
+
+## API ドキュメント作成ルール
+
+このプロジェクトでは、FastAPI の自動ドキュメント生成機能を活用して、API ドキュメントを作成・管理します。以下のルールに従って API ドキュメントを整備してください。
+
+### 1. OpenAPI 仕様の活用
+
+FastAPI は OpenAPI（旧 Swagger）仕様に基づいたドキュメントを自動生成します。これを最大限に活用するために、以下の原則を守ってください：
+
+```python
+# main.pyでの設定例
+from fastapi import FastAPI
+
+# アプリケーションのメタデータを設定
+app = FastAPI(
+    title="My AWS Next.js + FastAPI App",
+    description="Next.jsフロントエンドと連携するためのバックエンドAPI",
+    version="0.1.0",
+    openapi_tags=[
+        {
+            "name": "users",
+            "description": "ユーザー関連の操作",
+        },
+        {
+            "name": "items",
+            "description": "アイテム関連の操作",
+        },
+    ],
+    docs_url="/api/docs",  # Swagger UIのURL
+    redoc_url="/api/redoc",  # ReDocのURL
+    openapi_url="/api/openapi.json"  # OpenAPI JSONのURL
+)
+```
+
+### 2. エンドポイントの詳細な説明
+
+各エンドポイントには、詳細な説明とパラメータ情報を含めてください：
+
+```python
+from fastapi import FastAPI, Path, Query, Body
+from typing import Optional, List
+from pydantic import BaseModel, Field
+
+app = FastAPI()
+
+class Item(BaseModel):
+    name: str = Field(..., description="アイテムの名前", example="サンプルアイテム")
+    description: Optional[str] = Field(None, description="アイテムの詳細説明", example="これはサンプルアイテムの説明です")
+    price: float = Field(..., gt=0, description="アイテムの価格（0より大きい値）", example=1500.0)
+    tax: Optional[float] = Field(None, description="適用される税率", example=0.1)
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "サンプルアイテム",
+                "description": "これはサンプルアイテムの説明です",
+                "price": 1500.0,
+                "tax": 0.1
+            }
+        }
+
+@app.get(
+    "/items/{item_id}",
+    summary="特定のアイテムを取得",
+    description="指定されたIDを持つアイテムの詳細情報を返します。アイテムが存在しない場合は404エラーとなります。",
+    response_model=Item,
+    tags=["items"],
+    status_code=200,
+    responses={
+        200: {
+            "description": "アイテムの詳細情報",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "name": "サンプルアイテム",
+                        "description": "これはサンプルアイテムの説明です",
+                        "price": 1500.0,
+                        "tax": 0.1
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "指定されたIDのアイテムが見つかりません",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Item not found"}
+                }
+            }
+        }
+    }
+)
+def get_item(
+    item_id: int = Path(..., title="アイテムID", description="取得したいアイテムのID", ge=1),
+    q: Optional[str] = Query(None, title="検索クエリ", description="オプションの検索クエリ文字列", min_length=3, max_length=50)
+):
+    """
+    指定されたIDのアイテムを取得します。
+
+    - **item_id**: 取得するアイテムのID
+    - **q**: 任意の検索クエリパラメータ
+    """
+    # 実際の処理はここに記述
+    return {"item_id": item_id, "name": "サンプルアイテム", "description": "クエリ: " + q if q else None, "price": 1500.0}
+```
+
+### 3. レスポンスモデルの定義
+
+すべての API エンドポイントに対して、明確なレスポンスモデルを定義してください：
+
+```python
+from typing import List, Optional
+from pydantic import BaseModel, Field
+from fastapi import FastAPI
+
+app = FastAPI()
+
+# リクエストモデル
+class ItemCreate(BaseModel):
+    name: str = Field(..., description="アイテムの名前")
+    description: Optional[str] = Field(None, description="アイテムの説明")
+    price: float = Field(..., description="アイテムの価格")
+
+# レスポンスモデル
+class ItemResponse(BaseModel):
+    id: str = Field(..., description="アイテムの一意のID")
+    name: str = Field(..., description="アイテムの名前")
+    description: Optional[str] = Field(None, description="アイテムの説明")
+    price: float = Field(..., description="アイテムの価格")
+    created_at: str = Field(..., description="作成日時（ISO 8601形式）")
+    updated_at: str = Field(..., description="更新日時（ISO 8601形式）")
+
+# リスト用のレスポンスモデル
+class ItemListResponse(BaseModel):
+    items: List[ItemResponse] = Field(..., description="アイテムのリスト")
+    total: int = Field(..., description="合計アイテム数")
+    page: int = Field(..., description="現在のページ番号")
+    page_size: int = Field(..., description="ページあたりのアイテム数")
+
+@app.post("/items/", response_model=ItemResponse, tags=["items"])
+def create_item(item: ItemCreate):
+    """新しいアイテムを作成します"""
+    # 実際の処理はここに記述
+    return {
+        "id": "123",
+        "name": item.name,
+        "description": item.description,
+        "price": item.price,
+        "created_at": "2023-01-01T00:00:00Z",
+        "updated_at": "2023-01-01T00:00:00Z"
+    }
+
+@app.get("/items/", response_model=ItemListResponse, tags=["items"])
+def list_items(page: int = 1, page_size: int = 10):
+    """アイテムのリストを取得します"""
+    # 実際の処理はここに記述
+    return {
+        "items": [
+            {
+                "id": "123",
+                "name": "サンプルアイテム1",
+                "description": "説明1",
+                "price": 1500.0,
+                "created_at": "2023-01-01T00:00:00Z",
+                "updated_at": "2023-01-01T00:00:00Z"
+            },
+            {
+                "id": "456",
+                "name": "サンプルアイテム2",
+                "description": "説明2",
+                "price": 2000.0,
+                "created_at": "2023-01-02T00:00:00Z",
+                "updated_at": "2023-01-02T00:00:00Z"
+            }
+        ],
+        "total": 100,
+        "page": page,
+        "page_size": page_size
+    }
+```
+
+### 4. エラーレスポンスの標準化
+
+エラーレスポンスを標準化し、一貫したフォーマットを維持してください：
+
+```python
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel
+
+app = FastAPI()
+
+# 標準エラーレスポンスモデル
+class HttpError(BaseModel):
+    detail: str
+    code: str = None  # エラーコード（オプション）
+
+# カスタム例外ハンドラ
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    error = HttpError(detail=exc.detail)
+    if hasattr(exc, "code") and exc.code:
+        error.code = exc.code
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=jsonable_encoder(error)
+    )
+
+# 以下はエンドポイントの例
+@app.get("/items/{item_id}")
+async def read_item(item_id: str):
+    if item_id == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+            code="ITEM_NOT_FOUND"  # カスタムエラーコード
+        )
+    return {"id": item_id, "name": "サンプルアイテム"}
+```
+
+### 5. ドキュメントのカテゴリ分け
+
+エンドポイントをカテゴリ（タグ）で整理して、ドキュメントを見やすくします：
+
+```python
+from fastapi import APIRouter, FastAPI
+
+app = FastAPI()
+
+# ユーザー関連のルーター
+user_router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+    responses={404: {"description": "Not found"}},
+)
+
+# アイテム関連のルーター
+item_router = APIRouter(
+    prefix="/items",
+    tags=["items"],
+    responses={404: {"description": "Not found"}},
+)
+
+@user_router.get("/")
+async def read_users():
+    return [{"name": "John Doe"}, {"name": "Jane Doe"}]
+
+@user_router.get("/{user_id}")
+async def read_user(user_id: str):
+    return {"id": user_id, "name": "John Doe"}
+
+@item_router.get("/")
+async def read_items():
+    return [{"name": "Item 1"}, {"name": "Item 2"}]
+
+@item_router.get("/{item_id}")
+async def read_item(item_id: str):
+    return {"id": item_id, "name": "Item"}
+
+# ルーターをアプリケーションに含める
+app.include_router(user_router)
+app.include_router(item_router)
+```
+
+### 6. 認証要件の明示化
+
+保護されたエンドポイントには認証要件を明示的に文書化します：
+
+```python
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import Optional
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+app = FastAPI()
+
+# トークンの発行
+@app.post("/token", tags=["auth"])
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    # 実際の認証処理はここに記述
+    return {"access_token": "sample_token", "token_type": "bearer"}
+
+# 認証が必要なエンドポイント
+@app.get(
+    "/users/me",
+    tags=["users"],
+    summary="現在のユーザー情報を取得",
+    description="JWTトークンで認証されている現在のユーザーの情報を返します。",
+    responses={
+        401: {
+            "description": "認証エラー。有効なJWTトークンが提供されていません。",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authenticated"}
+                }
+            }
+        }
+    }
+)
+async def read_users_me(token: str = Depends(oauth2_scheme)):
+    # 実際のトークン検証とユーザー取得はここに記述
+    return {"id": "current_user", "username": "johndoe"}
+```
+
+### 7. API バージョニングの文書化
+
+API バージョンを明確に文書化し、バージョン間の違いを説明します：
+
+```python
+from fastapi import FastAPI
+
+# メインアプリケーション
+app = FastAPI(title="My API", version="1.0.0")
+
+# v1のAPIルーター
+v1_app = FastAPI(
+    title="My API",
+    version="1.0.0",
+    description="API v1 - 基本的なCRUD操作をサポート"
+)
+
+# v2のAPIルーター（新機能を追加）
+v2_app = FastAPI(
+    title="My API",
+    version="2.0.0",
+    description="API v2 - v1の機能に加え、高度な検索およびフィルタリング機能をサポート"
+)
+
+@v1_app.get("/items/", tags=["items"])
+async def read_items_v1():
+    return [{"name": "Item 1", "id": "1"}]
+
+@v2_app.get("/items/", tags=["items"])
+async def read_items_v2(q: str = None, sort: str = None):
+    # 検索およびソート機能を追加
+    items = [{"name": "Item 1", "id": "1"}, {"name": "Item 2", "id": "2"}]
+    if q:
+        items = [item for item in items if q.lower() in item["name"].lower()]
+    if sort == "desc":
+        items.reverse()
+    return items
+
+# メインアプリにバージョン付きのAPIをマウント
+app.mount("/v1", v1_app)
+app.mount("/v2", v2_app)
+
+# メインページをリダイレクト
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the API. Use /v1 or /v2 to access different versions."}
+```
+
+### 8. API ドキュメントのカスタマイズ
+
+FastAPI が提供する Swagger UI および ReDoc インターフェースをカスタマイズして、ブランディングを追加します：
+
+```python
+from fastapi import FastAPI
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(
+    title="My API",
+    description="API Description",
+    version="1.0.0",
+    docs_url="/api/docs",  # Swagger UIのカスタムURL
+    redoc_url="/api/redoc",  # ReDocのカスタムURL
+    # カスタムロゴの設定
+    swagger_ui_parameters={
+        "persistAuthorization": True,  # 認証情報の保持
+        "displayRequestDuration": True,  # リクエスト処理時間の表示
+        "filter": True,  # エンドポイントのフィルタリング機能
+        "syntaxHighlight.theme": "monokai"  # シンタックスハイライトのテーマ
+    }
+)
+
+# 静的ファイルを提供するためのディレクトリをマウント（カスタムロゴなど）
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+```
+
+### 9. リクエスト例の提供
+
+API 呼び出しの例を提供して、使用方法を明確にします：
+
+````python
+from fastapi import Body, FastAPI
+from pydantic import BaseModel, Field
+from typing import Optional
+
+app = FastAPI()
+
+class User(BaseModel):
+    username: str = Field(..., example="johndoe")
+    email: str = Field(..., example="john.doe@example.com")
+    full_name: Optional[str] = Field(None, example="John Doe")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "username": "johndoe",
+                "email": "john.doe@example.com",
+                "full_name": "John Doe"
+            }
+        }
+
+@app.post(
+    "/users/",
+    tags=["users"],
+    summary="ユーザーを作成",
+    description="""
+    この API はユーザーを作成します。
+
+    ## サンプルリクエスト
+
+    ```bash
+    curl -X 'POST' \\
+      'http://localhost:8000/users/' \\
+      -H 'accept: application/json' \\
+      -H 'Content-Type: application/json' \\
+      -d '{
+      "username": "johndoe",
+      "email": "john.doe@example.com",
+      "full_name": "John Doe"
+    }'
+    ```
+
+    ## レスポンス例
+
+    ```json
+    {
+      "id": "123456",
+      "username": "johndoe",
+      "email": "john.doe@example.com",
+      "full_name": "John Doe"
+    }
+    ```
+    """
+)
+async def create_user(user: User = Body(..., examples={
+    "normal": {
+        "summary": "標準的なユーザー作成例",
+        "description": "すべての属性を指定したユーザー作成",
+        "value": {
+            "username": "johndoe",
+            "email": "john.doe@example.com",
+            "full_name": "John Doe"
+        }
+    },
+    "minimal": {
+        "summary": "必須フィールドのみの例",
+        "description": "必須フィールドのみを指定したユーザー作成",
+        "value": {
+            "username": "johndoe",
+            "email": "john.doe@example.com"
+        }
+    }
+})):
+    return {
+        "id": "123456",
+        **user.dict()
+    }
+````
+
+### 10. モックサーバーの提供
+
+開発中にモックサーバーを提供して、API の動作を確認します：
+
+```python
+from fastapi import FastAPI, Path, HTTPException
+from typing import List, Dict, Any
+import json
+from pathlib import Path as FilePath
+
+app = FastAPI(title="Mock API Server")
+
+# モックデータの読み込み
+def load_mock_data(file_name: str) -> List[Dict[str, Any]]:
+    try:
+        data_file = FilePath(__file__).parent / "mock_data" / file_name
+        with open(data_file, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+# ユーザーデータのモック
+users = load_mock_data("users.json")
+
+@app.get("/users/", tags=["users"])
+async def get_users():
+    """
+    テスト用のユーザーリストを返す
+    このエンドポイントは開発およびテスト環境でのみ利用可能です
+    """
+    return users
+
+@app.get("/users/{user_id}", tags=["users"])
+async def get_user(user_id: str = Path(..., title="ユーザーID")):
+    """
+    特定のユーザー情報を返す
+    このエンドポイントは開発およびテスト環境でのみ利用可能です
+    """
+    for user in users:
+        if user["id"] == user_id:
+            return user
+    raise HTTPException(status_code=404, detail="User not found")
+```
+
+### 11. 自動ドキュメント生成のコマンド
+
+オフラインドキュメント生成用のコマンドを提供します：
+
+```bash
+# package.jsonへの追加
+{
+  "scripts": {
+    "generate-api-docs": "python -m scripts.generate_api_docs"
+  }
+}
+```
+
+```python
+# scripts/generate_api_docs.py
+import json
+import os
+from pathlib import Path
+
+import uvicorn
+from fastapi.openapi.utils import get_openapi
+
+# FastAPIアプリをインポート
+from app.main import app
+
+def generate_openapi_json():
+    """OpenAPI JSONを生成してファイルに保存する"""
+    docs_dir = Path("docs/api")
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    # OpenAPI JSONを保存
+    with open(docs_dir / "openapi.json", "w") as f:
+        json.dump(openapi_schema, f, indent=2)
+
+    print(f"OpenAPI JSON saved to {docs_dir / 'openapi.json'}")
+
+    # HTML版のドキュメントも生成したい場合は、Swagger UIやReDocの静的HTMLを生成するコードを追加
+
+if __name__ == "__main__":
+    generate_openapi_json()
+```
+
+
+## FastAPI/Python ユニットテストルール
+
+このプロジェクトでは、バックエンドコードの品質を確保するために、効果的なユニットテストの作成と実行が重要です。以下のルールに従ってテストを実装してください。
+
+### 1. テストフレームワークとライブラリ
+
+テストには以下のライブラリを使用します：
+
+```python
+# requirements-dev.txt
+pytest==7.3.1
+pytest-cov==4.1.0
+pytest-asyncio==0.21.0
+httpx==0.24.1  # FastAPIのテスト用HTTPクライアント
+```
+
+### 2. テストディレクトリ構造
+
+テストは以下のディレクトリ構造に従って整理します：
+
+```
+backend/
+├── app/
+│   ├── main.py
+│   ├── api/
+│   ├── core/
+│   ├── models/
+│   └── ...
+├── tests/
+│   ├── conftest.py      # 共通のフィクスチャ
+│   ├── test_main.py     # メインアプリのテスト
+│   ├── api/             # APIルーターのテスト
+│   │   ├── test_users.py
+│   │   └── test_items.py
+│   ├── core/            # コア機能のテスト
+│   │   └── test_auth.py
+│   └── utils/           # ヘルパー関数のテスト
+│       └── test_helpers.py
+```
+
+### 3. テストクライアントの設定
+
+FastAPI アプリケーションのテストのために、テストクライアントを設定します：
+
+```python
+# tests/conftest.py
+import pytest
+from fastapi.testclient import TestClient
+from httpx import AsyncClient
+import os
+import sys
+
+# アプリケーションのルートディレクトリをパスに追加
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from app.main import app
+from app.core.config import settings
+
+# 同期テストクライアント
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
+
+# 非同期テストクライアント
+@pytest.fixture
+async def async_client():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+
+# テスト用のベースURL
+@pytest.fixture
+def base_url():
+    return "http://test"
+```
+
+### 4. 環境変数とテスト設定
+
+テスト環境用の設定を行います：
+
+```python
+# tests/conftest.py（続き）
+import os
+from app.core.config import settings
+
+@pytest.fixture(autouse=True)
+def setup_test_environment():
+    # テスト環境用の環境変数を設定
+    os.environ["ENVIRONMENT"] = "test"
+    os.environ["DYNAMODB_TABLE_NAME"] = "TestTable"
+    os.environ["AWS_REGION"] = "us-east-1"
+
+    # モックのAWS認証情報
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_SECURITY_TOKEN"] = "testing"
+    os.environ["AWS_SESSION_TOKEN"] = "testing"
+
+    # FastAPIのテスト設定を適用
+    app.dependency_overrides = {}  # 依存関係の上書きをリセット
+
+    yield  # テスト実行
+
+    # テスト後のクリーンアップ
+    os.environ.pop("ENVIRONMENT", None)
+    app.dependency_overrides = {}
+```
+
+### 5. DynamoDB モックの設定
+
+AWS DynamoDB のモックを使ってテストを行います：
+
+```python
+# tests/conftest.py（続き）
+import boto3
+import pytest
+from moto import mock_dynamodb
+
+@pytest.fixture
+def mock_dynamodb_resource():
+    with mock_dynamodb():
+        # DynamoDBのモックを作成
+        dynamodb = boto3.resource(
+            'dynamodb',
+            region_name='us-east-1',
+            aws_access_key_id='testing',
+            aws_secret_access_key='testing'
+        )
+
+        # テスト用テーブルの作成
+        table = dynamodb.create_table(
+            TableName='TestTable',
+            KeySchema=[
+                {'AttributeName': 'PK', 'KeyType': 'HASH'},
+                {'AttributeName': 'SK', 'KeyType': 'RANGE'}
+            ],
+            AttributeDefinitions=[
+                {'AttributeName': 'PK', 'AttributeType': 'S'},
+                {'AttributeName': 'SK', 'AttributeType': 'S'},
+                {'AttributeName': 'GSI1PK', 'AttributeType': 'S'},
+                {'AttributeName': 'GSI1SK', 'AttributeType': 'S'}
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    'IndexName': 'GSI1',
+                    'KeySchema': [
+                        {'AttributeName': 'GSI1PK', 'KeyType': 'HASH'},
+                        {'AttributeName': 'GSI1SK', 'KeyType': 'RANGE'}
+                    ],
+                    'Projection': {'ProjectionType': 'ALL'},
+                    'ProvisionedThroughput': {
+                        'ReadCapacityUnits': 5,
+                        'WriteCapacityUnits': 5
+                    }
+                }
+            ],
+            ProvisionedThroughput={
+                'ReadCapacityUnits': 5,
+                'WriteCapacityUnits': 5
+            }
+        )
+
+        yield dynamodb
+```
+
+### 6. テストデータのセットアップ
+
+テストデータを作成するヘルパー関数を提供します：
+
+```python
+# tests/utils/test_data.py
+import uuid
+from datetime import datetime
+from typing import Dict, Any, List
+
+def create_test_user(user_id: str = None) -> Dict[str, Any]:
+    """テスト用のユーザーデータを作成する"""
+    if not user_id:
+        user_id = str(uuid.uuid4())
+
+    timestamp = datetime.now().isoformat()
+
+    return {
+        'PK': f'USER#{user_id}',
+        'SK': f'METADATA#{user_id}',
+        'type': 'USER',
+        'id': user_id,
+        'email': f'test-{user_id}@example.com',
+        'name': f'Test User {user_id}',
+        'created_at': timestamp,
+        'updated_at': timestamp
+    }
+
+def create_test_item(item_id: str = None, user_id: str = None) -> Dict[str, Any]:
+    """テスト用のアイテムデータを作成する"""
+    if not item_id:
+        item_id = str(uuid.uuid4())
+    if not user_id:
+        user_id = str(uuid.uuid4())
+
+    timestamp = datetime.now().isoformat()
+
+    return {
+        'PK': f'ITEM#{item_id}',
+        'SK': f'METADATA#{item_id}',
+        'type': 'ITEM',
+        'id': item_id,
+        'user_id': user_id,
+        'name': f'Test Item {item_id}',
+        'description': f'Description for test item {item_id}',
+        'created_at': timestamp,
+        'updated_at': timestamp
+    }
+
+def seed_test_data(dynamodb, table_name: str, items: List[Dict[str, Any]]):
+    """テストデータをDynamoDBテーブルに投入する"""
+    table = dynamodb.Table(table_name)
+
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.put_item(Item=item)
+
+    return len(items)
+```
+
+### 7. API エンドポイントのテスト
+
+API エンドポイントのテスト例を以下に示します：
+
+```python
+# tests/api/test_items.py
+import pytest
+from fastapi import status
+from app.schemas.item import ItemResponse
+
+def test_get_items(client, mock_dynamodb_resource):
+    """アイテム一覧を取得するAPIのテスト"""
+    # テスト準備: テストデータの作成
+    from tests.utils.test_data import create_test_item, seed_test_data
+
+    user_id = "test-user-id"
+    items = [
+        create_test_item(item_id=f"item-{i}", user_id=user_id)
+        for i in range(5)
+    ]
+
+    seed_test_data(mock_dynamodb_resource, "TestTable", items)
+
+    # APIリクエスト
+    response = client.get("/items/")
+
+    # レスポンスの検証
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "items" in data
+    assert len(data["items"]) == 5
+    assert data["total"] == 5
+
+    # 項目の検証
+    for i, item in enumerate(data["items"]):
+        assert item["id"].startswith("item-")
+        assert item["name"].startswith("Test Item")
+
+def test_get_item_by_id(client, mock_dynamodb_resource):
+    """特定のアイテムを取得するAPIのテスト"""
+    # テスト準備
+    from tests.utils.test_data import create_test_item, seed_test_data
+
+    item_id = "test-item-id"
+    user_id = "test-user-id"
+
+    test_item = create_test_item(item_id=item_id, user_id=user_id)
+    seed_test_data(mock_dynamodb_resource, "TestTable", [test_item])
+
+    # APIリクエスト
+    response = client.get(f"/items/{item_id}")
+
+    # レスポンスの検証
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == item_id
+    assert data["name"] == f"Test Item {item_id}"
+    assert data["user_id"] == user_id
+
+def test_get_nonexistent_item(client, mock_dynamodb_resource):
+    """存在しないアイテムを取得しようとした場合のテスト"""
+    # 存在しないアイテムIDでリクエスト
+    item_id = "non-existent-item"
+    response = client.get(f"/items/{item_id}")
+
+    # 404エラーが返されることを確認
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    data = response.json()
+    assert "detail" in data
+    assert "not found" in data["detail"].lower()
+
+def test_create_item(client, mock_dynamodb_resource):
+    """新しいアイテムを作成するAPIのテスト"""
+    # テスト用のユーザーを作成
+    from tests.utils.test_data import create_test_user, seed_test_data
+
+    user_id = "test-user-id"
+    user = create_test_user(user_id=user_id)
+    seed_test_data(mock_dynamodb_resource, "TestTable", [user])
+
+    # 新しいアイテムのデータ
+    new_item = {
+        "name": "New Test Item",
+        "description": "Description for new test item",
+        "price": 1500.0
+    }
+
+    # APIリクエスト（認証ヘッダーを含む）
+    response = client.post(
+        "/items/",
+        json=new_item,
+        headers={"X-User-ID": user_id}  # テスト用の認証ヘッダー
+    )
+
+    # レスポンスの検証
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["name"] == new_item["name"]
+    assert data["description"] == new_item["description"]
+    assert data["price"] == new_item["price"]
+    assert "id" in data
+    assert "created_at" in data
+    assert "updated_at" in data
+
+    # DynamoDBに保存されたことを確認
+    table = mock_dynamodb_resource.Table("TestTable")
+    response = table.get_item(
+        Key={
+            "PK": f"ITEM#{data['id']}",
+            "SK": f"METADATA#{data['id']}"
+        }
+    )
+
+    assert "Item" in response
+    item = response["Item"]
+    assert item["name"] == new_item["name"]
+    assert item["user_id"] == user_id
+```
+
+### 8. 非同期 API のテスト
+
+非同期 API エンドポイントのテスト例を以下に示します：
+
+```python
+# tests/api/test_async_endpoints.py
+import pytest
+import asyncio
+from httpx import AsyncClient
+from fastapi import status
+
+# pytestマーカーで非同期テストを指定
+pytestmark = pytest.mark.asyncio
+
+async def test_async_get_user(async_client: AsyncClient, mock_dynamodb_resource):
+    """非同期ユーザー取得APIのテスト"""
+    # テスト準備
+    from tests.utils.test_data import create_test_user, seed_test_data
+
+    user_id = "async-test-user"
+    user = create_test_user(user_id=user_id)
+    seed_test_data(mock_dynamodb_resource, "TestTable", [user])
+
+    # 非同期APIリクエスト
+    response = await async_client.get(f"/users/{user_id}")
+
+    # レスポンスの検証
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == user_id
+    assert data["email"] == f"test-{user_id}@example.com"
+```
+
+### 9. モックとスタブの使用
+
+依存関係をモックする例:
+
+```python
+# tests/api/test_users_with_mocks.py
+import pytest
+from unittest import mock
+from fastapi import status
+
+def test_get_user_with_mocked_db(client):
+    """DynamoDBアクセスをモックしたユーザー取得APIのテスト"""
+    user_id = "mocked-user-id"
+
+    # DynamoDB関数をモック化
+    with mock.patch("app.services.user_service.get_user_by_id") as mock_get_user:
+        # モックの戻り値を設定
+        mock_get_user.return_value = {
+            "id": user_id,
+            "email": "mocked@example.com",
+            "name": "Mocked User",
+            "created_at": "2023-01-01T00:00:00Z",
+            "updated_at": "2023-01-01T00:00:00Z"
+        }
+
+        # APIリクエスト
+        response = client.get(f"/users/{user_id}")
+
+        # モック関数が正しく呼び出されたか確認
+        mock_get_user.assert_called_once_with(user_id)
+
+        # レスポンスの検証
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["id"] == user_id
+        assert data["email"] == "mocked@example.com"
+```
+
+### 10. 依存関係のオーバーライド
+
+FastAPI の依存関係をオーバーライドするテスト例:
+
+```python
+# app/dependencies.py
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    # 実際のトークン検証ロジック（省略）
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+# tests/api/test_auth.py
+import pytest
+from fastapi import status
+from app.main import app
+from app.dependencies import get_current_user
+
+# テスト用のダミーユーザー
+async def override_get_current_user():
+    return {
+        "id": "test-user",
+        "email": "test@example.com",
+        "name": "Test User"
+    }
+
+def test_protected_endpoint_with_overridden_dependency(client):
+    """認証依存関係をオーバーライドした保護されたエンドポイントのテスト"""
+    # 依存関係をオーバーライド
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    # 保護されたエンドポイントにリクエスト
+    response = client.get("/users/me")
+
+    # 認証をバイパスしてアクセスできることを確認
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == "test-user"
+    assert data["email"] == "test@example.com"
+
+    # テスト後にオーバーライドをクリア
+    app.dependency_overrides = {}
+```
+
+### 11. カバレッジレポートの生成
+
+テストカバレッジを測定し、レポートを生成します：
+
+```bash
+# pytest.ini
+[pytest]
+testpaths = tests
+python_files = test_*.py
+python_functions = test_*
+python_classes = Test*
+addopts = --cov=app --cov-report=term --cov-report=html:coverage_report
+```
+
+```bash
+# コマンド例
+pytest --cov=app --cov-report=term --cov-report=html:coverage_report
+```
+
+### 12. CI パイプラインでのテスト実行
+
+GitHub Actions などの CI パイプラインでテストを実行する設定例：
+
+```yaml
+# .github/workflows/test.yml
+name: Run Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-dev.txt
+
+      - name: Run tests with pytest
+        run: |
+          cd backend
+          pytest --cov=app --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.xml
+          flags: unittests
+          fail_ci_if_error: true
+```
+
+### 13. API トランザクションテスト例
+
+複合的な API トランザクションのテスト例：
+
+```python
+# tests/test_transactions.py
+def test_create_item_and_get_it(client, mock_dynamodb_resource):
+    """アイテムを作成して取得する一連の操作のテスト"""
+    # 1. テスト用のユーザーを作成
+    from tests.utils.test_data import create_test_user, seed_test_data
+
+    user_id = "test-user-id"
+    user = create_test_user(user_id=user_id)
+    seed_test_data(mock_dynamodb_resource, "TestTable", [user])
+
+    # 2. 新しいアイテムを作成
+    new_item = {
+        "name": "Transaction Test Item",
+        "description": "Item for transaction test",
+        "price": 2000.0
+    }
+
+    create_response = client.post(
+        "/items/",
+        json=new_item,
+        headers={"X-User-ID": user_id}
+    )
+
+    assert create_response.status_code == 201
+    created_item = create_response.json()
+    item_id = created_item["id"]
+
+    # 3. 作成したアイテムを取得
+    get_response = client.get(f"/items/{item_id}")
+
+    assert get_response.status_code == 200
+    retrieved_item = get_response.json()
+
+    # 4. 作成したアイテムと取得したアイテムを比較
+    assert retrieved_item["id"] == item_id
+    assert retrieved_item["name"] == new_item["name"]
+    assert retrieved_item["description"] == new_item["description"]
+    assert retrieved_item["price"] == new_item["price"]
+    assert retrieved_item["user_id"] == user_id
+```
+
+### 14. パラメトリックテスト
+
+異なるパラメータでのテスト例：
+
+```python
+# tests/test_parametric.py
+import pytest
+from fastapi import status
+
+@pytest.mark.parametrize(
+    "item_data,expected_status",
+    [
+        ({"name": "Valid Item", "price": 100.0}, status.HTTP_201_CREATED),
+        ({"name": "", "price": 100.0}, status.HTTP_422_UNPROCESSABLE_ENTITY),  # 空の名前
+        ({"name": "Invalid Price", "price": -10.0}, status.HTTP_422_UNPROCESSABLE_ENTITY),  # 負の価格
+        ({"name": "Missing Price"}, status.HTTP_422_UNPROCESSABLE_ENTITY),  # 価格なし
+        ({"price": 100.0}, status.HTTP_422_UNPROCESSABLE_ENTITY),  # 名前なし
+    ]
+)
+def test_create_item_validation(client, mock_dynamodb_resource, item_data, expected_status):
+    """さまざまな入力値でアイテム作成を検証するパラメータ化テスト"""
+    # ユーザーを作成
+    from tests.utils.test_data import create_test_user, seed_test_data
+
+    user_id = "test-param-user"
+    user = create_test_user(user_id=user_id)
+    seed_test_data(mock_dynamodb_resource, "TestTable", [user])
+
+    # APIリクエスト
+    response = client.post(
+        "/items/",
+        json=item_data,
+        headers={"X-User-ID": user_id}
+    )
+
+    # ステータスコードの検証
+    assert response.status_code == expected_status
+```
+
+### 15. テストユーティリティ
+
+テストで役立つユーティリティ関数の例：
+
+```python
+# tests/utils/helpers.py
+import json
+import jwt
+from datetime import datetime, timedelta
+from app.core.config import settings
+
+def generate_test_token(user_id: str, expires_delta: timedelta = None) -> str:
+    """テスト用のJWTトークンを生成する"""
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+
+    payload = {
+        "sub": user_id,
+        "exp": expire,
+        "iat": datetime.utcnow(),
+        "type": "access_token"
+    }
+
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+def parse_json_response(response) -> dict:
+    """レスポンスJSONをパースして返す"""
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON", "content": response.content}
+
+def assert_items_equal(item1, item2, fields_to_compare=None):
+    """2つのアイテムの特定のフィールドが一致するか確認する"""
+    if fields_to_compare is None:
+        fields_to_compare = ["id", "name", "description", "price"]
+
+    for field in fields_to_compare:
+        assert item1.get(field) == item2.get(field), f"Field '{field}' does not match"
+```
+
+
